@@ -1,0 +1,4 @@
+segmentation_model_backbone: efficientnet-b4
+segmentation_pretrained_dataset: imagenet
+segmentation_model_type: DeepLabV3Plus
+semantic_classes: 20
