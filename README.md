@@ -29,6 +29,47 @@ Download the pretrained DeepLabV3 weights for ROADWork from [here](https://drive
 Place the weight file in `./DeeplabV3/weights/sem_segm_gps_split/`
 
 
+### 1.3 Dataset Preparation
+
+All datasets and source images/videos are placed in `./Datasets/...`
+
+#### ROADwork
+
+Download the required files from [this link](https://kilthub.cmu.edu/articles/dataset/ROADWork_Data/26093197), including:
+
+- `images.zip`
+- `annotations.zip`
+- `sem_seg_labels.zip`
+- `video_compressed.z01`
+
+#### BDD100K
+
+Download the required files from [this link](http://bdd-data.berkeley.edu/download.html), including:
+
+- `10K images`
+- `video/bdd100k_videos_train_00.zip `
+
+#### Data Organization
+
+Then organize the dataset in the following structure:
+
+```text
+Datasets
+├── ROADwork
+│   ├── images/
+│   ├── annotations/
+│   ├── sem_seg_labels/
+│   └── videos/
+└── BDD100K
+    ├── 10K/
+    │   ├── train/
+    │   ├── val/
+    │   └── test/
+    └── video/
+```
+
+
+
 ## 2. Run Demos
 
 Run YOLOPv2 demo:

@@ -1,2 +1,5 @@
 *.pth
 *pt
+
+/Datasets/ROADwork
+/Datasets/BDD100K
