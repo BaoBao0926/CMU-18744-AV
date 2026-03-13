@@ -72,8 +72,8 @@ Datasets
 
 ## 2. Run Demos
 
+### 2.1 YOLOPv2 and DeepLabV3+ Demo
 Run YOLOPv2 demo:
-
 ```bash
 python Demo_YOLOPV2.py --source "*.jpg"
 ```
@@ -87,6 +87,20 @@ Run the merged demo for both YOLOPv2 and DeepLabV3:
 ```bash
 python Demo_merged.py --source "*.jpg"
 ```
+
+### All-in-one Demo
+
+For nuScenes
+```bash
+python demo_all_nusc.py
+```
+
+For BDD100K and ROADwork:
+```bash
+python demo_all_BDD_ROADwork.py --dataset <BDD100K|ROADwork> --source <path_to_image_or_video_or_directory>
+```
+-- `dataset`: choose from BDD100K or ROADwork
+-- `source`: supports a single image, a single video, or a directory containing images and videos
 
 #### Output
 
