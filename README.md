@@ -90,6 +90,11 @@ python Demo_merged.py --source "*.jpg"
 
 ### All-in-one Demo
 
+v1 is the all-in-one code, including yolopv2, deeplabv3 and route planning.
+
+v2 adds a coarse semantic grid overlay (with merged regions) and extra grid-only outputs for easier visualization.
+
+
 For nuScenes
 ```bash
 python demo_all_nusc.py
@@ -97,10 +102,15 @@ python demo_all_nusc.py
 
 For BDD100K and ROADwork:
 ```bash
-python demo_all_BDD_ROADwork.py --dataset <BDD100K|ROADwork> --source <path_to_image_or_video_or_directory>
+python demo_all_BDD_ROADwork_v1.py --dataset <BDD100K|ROADwork> --source <path_to_image_or_video_or_directory>
+
+python demo_all_BDD_ROADwork_v2.py --dataset <BDD100K|ROADwork> --source <path_to_image_or_video_or_directory>
 ```
 -- `dataset`: choose from BDD100K or ROADwork
+
 -- `source`: supports a single image, a single video, or a directory containing images and videos
+
+Example: python demo_all_BDD_ROADwork.py --dataset BDD100K --source <path_to_image_or_video_or_directory>
 
 #### Output
 
