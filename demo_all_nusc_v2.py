@@ -29,7 +29,6 @@ import DeeplabV3.misc.segm.lookup_table as lut
 DATAROOT = "/home/zl3466/Documents/dataset/NuScenes"
 SCENE_NAME = "scene-0945"
 DISPLAY_SIZE = (1280, 720)
-OUTPUT_ROOT = os.path.join("output", "NuScenes")
 
 IMGSZ, STRIDE = 640, 32
 YOLO_WEIGHTS = "YOLOPv2/weights/yolopv2.pt"
@@ -38,6 +37,8 @@ CONF_THRES, IOU_THRES = 0.3, 0.45
 DEEPLAB_DIR = os.path.join("DeeplabV3", "weights", "sem_segm_gps_split")
 DEEPLAB_MODEL_PATH = os.path.join(DEEPLAB_DIR, "DeeplabV3Plus_EfficientNetB4_best_model_epoch_0060_workzone.pth")
 DEEPLAB_CONFIG_PATH = os.path.join(DEEPLAB_DIR, "DeeplabV3Plus_EfficientNetB4_workzone.yaml")
+
+WORKZONE_CLASSES = [6, 7, 8, 13, 14, 17]
 
 FREE, OBSTACLE = 0, 1
 CELL_SIZE = 16
@@ -121,144 +122,51 @@ def run_deeplab(deeplab_model, device, image_bgr, transform_full, transform_padd
     return cv2.cvtColor(blend, cv2.COLOR_RGB2BGR), pred_ids
 
 
-def _compute_grid_dims(h, w, base_cells=20):
-    short_side = min(h, w)
-    long_side = max(h, w)
-    long_cells = int(round(base_cells * long_side / float(short_side)))
-    long_cells = max(base_cells, long_cells)
-    if h <= w:
-        return base_cells, long_cells
-    return long_cells, base_cells
+def compute_workzone_mask(
+    im0_bgr,
+    ll_mask,
+    pred_ids,
+    workzone_classes,
+    evidence_ratio_thresh=0.01,
+    min_evidence_pixels=200,
+):
+    workzone_evidence = np.isin(pred_ids, workzone_classes).astype(np.uint8)
 
+    h, w = im0_bgr.shape[:2]
+    target_rows = 8
+    cell_size = max(8, int(round(h / target_rows)))
+    grid_h = int(np.ceil(h / cell_size))
+    grid_w = int(np.ceil(w / cell_size))
 
-def _resize_mask_nearest(mask, target_shape):
-    th, tw = target_shape
-    if mask.shape == (th, tw):
-        return mask
-    return cv2.resize(mask.astype(np.uint8), (tw, th), interpolation=cv2.INTER_NEAREST)
-
-
-def compute_high_level_semantics(pred_ids, drivable_mask, base_image_bgr=None):
-    if base_image_bgr is not None:
-        bh, bw = base_image_bgr.shape[:2]
-        if pred_ids.shape != (bh, bw):
-            pred_ids = cv2.resize(pred_ids.astype(np.uint8), (bw, bh), interpolation=cv2.INTER_NEAREST)
-        drivable_mask = _resize_mask_nearest(drivable_mask, (bh, bw))
-    h, w = pred_ids.shape
-    drivable_mask = _resize_mask_nearest(drivable_mask, (h, w))
-
-    workzone_ids = np.array([6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 19], dtype=np.uint8)
-    road_ids = np.array([1, 3], dtype=np.uint8)
-    sidewalk_id = 2
-    vehicle_ids = np.array([9, 10], dtype=np.uint8)
-
-    rows, cols = _compute_grid_dims(h, w)
-    y_edges = np.linspace(0, h, rows + 1).astype(int)
-    x_edges = np.linspace(0, w, cols + 1).astype(int)
-
-    labels = np.empty((rows, cols), dtype=object)
-
-    workzone_th = 0.10
-    non_drivable_vehicle_th = 0.08
-    non_drivable_road_th = 0.30
-    non_drivable_drive_max = 0.25
-    openlane_drivable_th = 0.40
-    openlane_road_th = 0.30
-    openlane_workzone_max = 0.05
-    openlane_vehicle_max = 0.05
-    sidewalk_th = 0.25
-
-    for r in range(rows):
-        y0, y1 = y_edges[r], y_edges[r + 1]
-        for c in range(cols):
-            x0, x1 = x_edges[c], x_edges[c + 1]
-            if y1 <= y0 or x1 <= x0:
-                labels[r, c] = "non-drivable area"
+    workzone_mask = np.zeros((h, w), dtype=np.uint8)
+    for gy in range(grid_h):
+        y0 = gy * cell_size
+        y1 = min(h, y0 + cell_size)
+        for gx in range(grid_w):
+            x0 = gx * cell_size
+            x1 = min(w, x0 + cell_size)
+            cell = workzone_evidence[y0:y1, x0:x1]
+            if cell.size == 0:
                 continue
-            cell_pred = pred_ids[y0:y1, x0:x1]
-            cell_drive = drivable_mask[y0:y1, x0:x1]
-            area = float(cell_pred.size)
-            if area == 0:
-                labels[r, c] = "non-drivable area"
-                continue
-            workzone_ratio = np.isin(cell_pred, workzone_ids).sum() / area
-            road_ratio = np.isin(cell_pred, road_ids).sum() / area
-            sidewalk_ratio = (cell_pred == sidewalk_id).sum() / area
-            drivable_ratio = (cell_drive == 1).sum() / area
-            vehicle_ratio = np.isin(cell_pred, vehicle_ids).sum() / area
+            evidence_pixels = int(cell.sum())
+            ratio = evidence_pixels / float(cell.size)
+            if ratio >= evidence_ratio_thresh or evidence_pixels >= min_evidence_pixels:
+                workzone_mask[y0:y1, x0:x1] = 1
 
-            if workzone_ratio >= workzone_th:
-                labels[r, c] = "workzone"
-            elif vehicle_ratio >= non_drivable_vehicle_th or (road_ratio >= non_drivable_road_th and drivable_ratio <= non_drivable_drive_max):
-                labels[r, c] = "non-drivable area"
-            elif drivable_ratio >= openlane_drivable_th and road_ratio >= openlane_road_th and workzone_ratio < openlane_workzone_max and vehicle_ratio < openlane_vehicle_max:
-                labels[r, c] = "open lane"
-            elif sidewalk_ratio >= sidewalk_th:
-                labels[r, c] = "sidewalk area"
-            else:
-                labels[r, c] = "non-drivable area"
-
-    visited = np.zeros((rows, cols), dtype=bool)
-    regions = []
-    for r in range(rows):
-        for c in range(cols):
-            if visited[r, c]:
-                continue
-            label = labels[r, c]
-            stack = [(r, c)]
-            visited[r, c] = True
-            cells = []
-            min_r = max_r = r
-            min_c = max_c = c
-            while stack:
-                cr, cc = stack.pop()
-                cells.append((cr, cc))
-                min_r = min(min_r, cr)
-                max_r = max(max_r, cr)
-                min_c = min(min_c, cc)
-                max_c = max(max_c, cc)
-                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    nr, nc = cr + dr, cc + dc
-                    if 0 <= nr < rows and 0 <= nc < cols and not visited[nr, nc] and labels[nr, nc] == label:
-                        visited[nr, nc] = True
-                        stack.append((nr, nc))
-            regions.append({
-                "label": label,
-                "cells": cells,
-                "bbox": (min_r, max_r, min_c, max_c),
-            })
-
-    return labels, regions, (x_edges, y_edges)
-
-
-def draw_semantic_regions(base_image_bgr, regions, x_edges, y_edges, fill_alpha=0.18):
-    viz = base_image_bgr.copy()
-    label_colors = {
-        "workzone": (0, 140, 255),
-        "open lane": (0, 200, 0),
-        "sidewalk area": (0, 215, 255),
-        "non-drivable area": (0, 0, 200),
-    }
-    for region in regions:
-        label = region["label"]
-        min_r, max_r, min_c, max_c = region["bbox"]
-        x0, x1 = x_edges[min_c], x_edges[max_c + 1]
-        y0, y1 = y_edges[min_r], y_edges[max_r + 1]
-        if y1 <= y0 or x1 <= x0:
-            continue
-        color = label_colors.get(label, (0, 0, 0))
-        if fill_alpha >= 1.0:
-            cv2.rectangle(viz, (x0, y0), (x1 - 1, y1 - 1), color, -1)
-        else:
-            overlay = viz.copy()
-            cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), color, -1)
-            viz = cv2.addWeighted(overlay, fill_alpha, viz, 1.0 - fill_alpha, 0)
-        cv2.rectangle(viz, (x0, y0), (x1 - 1, y1 - 1), (255, 255, 255), 1)
-        tx = x0 + 6
-        ty = y0 + 18
-        cv2.putText(viz, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2, cv2.LINE_AA)
-        cv2.putText(viz, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-    return viz
+    if workzone_mask.any():
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        workzone_mask = cv2.morphologyEx(workzone_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        workzone_mask = ndimage.binary_fill_holes(workzone_mask > 0).astype(np.uint8)
+        labeled, n = ndimage.label(workzone_mask)
+        if n > 0:
+            min_comp = int(0.002 * h * w)
+            keep = np.zeros_like(workzone_mask, dtype=bool)
+            for i in range(1, n + 1):
+                comp = labeled == i
+                if comp.sum() >= min_comp:
+                    keep |= comp
+            workzone_mask = keep.astype(np.uint8)
+    return workzone_mask
 
 
 # ---------- Route planning ----------
@@ -441,15 +349,6 @@ if __name__ == "__main__":
     deeplab.eval()
     th_lut = get_colormap(device)
 
-    os.makedirs(OUTPUT_ROOT, exist_ok=True)
-    out_base = os.path.join(OUTPUT_ROOT, f"{SCENE_NAME}_all.mp4")
-    out_grid = os.path.join(OUTPUT_ROOT, f"{SCENE_NAME}_all_grid.mp4")
-    out_grid_only = os.path.join(OUTPUT_ROOT, f"{SCENE_NAME}_grid.mp4")
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(out_base, fourcc, 10, DISPLAY_SIZE)
-    writer_grid = cv2.VideoWriter(out_grid, fourcc, 10, DISPLAY_SIZE)
-    writer_grid_only = cv2.VideoWriter(out_grid_only, fourcc, 10, DISPLAY_SIZE)
-
     for path in tqdm(paths, desc="CAM_FRONT"):
         im0 = cv2.resize(cv2.imread(path), DISPLAY_SIZE, interpolation=cv2.INTER_LINEAR)
         det, da, ll = run_yolopv2(yolo, device, im0, half)
@@ -462,15 +361,26 @@ if __name__ == "__main__":
         path_px, binary, grid, start_px, goal_px = plan_route(da, safety_px=SAFETY_DISTANCE_PIXELS)
         draw_route_overlay(merged, path_px, binary, grid, start_px, goal_px)
         draw_legend(merged)
-
-        _, regions, (x_edges, y_edges) = compute_high_level_semantics(pred_ids, da, base_image_bgr=merged)
-        merged_with_grid = draw_semantic_regions(merged, regions, x_edges, y_edges, fill_alpha=0.5)
-        grid_only = draw_semantic_regions(np.zeros_like(merged), regions, x_edges, y_edges, fill_alpha=1.0)
-
-        writer.write(merged)
-        writer_grid.write(merged_with_grid)
-        writer_grid_only.write(grid_only)
-
-    writer.release()
-    writer_grid.release()
-    writer_grid_only.release()
+        workzone_mask = compute_workzone_mask(
+            im0,
+            ll,
+            pred_ids,
+            WORKZONE_CLASSES,
+        )
+        mask = workzone_mask.astype(bool)
+        if mask.any():
+            merged[mask] = (merged[mask] * 0.4 + np.array([0, 0, 255]) * 0.6).astype(merged.dtype)
+            num, _, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+            for i in range(1, num):
+                x, y, w, h, area = stats[i]
+                if area == 0:
+                    continue
+                label = "workzone area"
+                text_x = max(0, x + 2)
+                text_y = max(12, y + 14)
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(merged, (text_x - 2, text_y - th - 4), (text_x + tw + 2, text_y + 2), (0, 0, 0), -1)
+                cv2.putText(merged, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.imshow("DeepLabV3 + YOLOPv2 + Route", merged)
+        cv2.waitKey(100)
+    cv2.destroyAllWindows()
