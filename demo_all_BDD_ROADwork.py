@@ -375,6 +375,7 @@ if __name__ == "__main__":
             writer.release()
     else:
         exp_dir = _next_exp_dir(output_root)
+        print(f"Output directory: {exp_dir}")
         os.makedirs(exp_dir, exist_ok=True)
         if _is_image(source):
             im0 = cv2.imread(source)
@@ -387,18 +388,20 @@ if __name__ == "__main__":
             cap = cv2.VideoCapture(source)
             if not cap.isOpened():
                 raise RuntimeError(f"Failed to open video: {source}")
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30
-            out_name = os.path.splitext(os.path.basename(source))[0] + "_all.mp4"
-            out_path = os.path.join(exp_dir, out_name)
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(out_path, fourcc, fps, DISPLAY_SIZE)
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                merged = _process_frame(frame, yolo, deeplab, device, half, transform_full, transform_padded, th_lut)
-                writer.write(merged)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+            with tqdm(total=total_frames, desc="Frames", unit="f") as pbar:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    merged = _process_frame(
+                        frame, yolo, deeplab, device, half, transform_full, transform_padded, th_lut
+                    )
+                    cv2.imshow("BDD Roadwork - Stream", merged)
+                    pbar.update(1)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
             cap.release()
-            writer.release()
+            cv2.destroyAllWindows()
         else:
             raise ValueError(f"Unsupported file type: {source}")

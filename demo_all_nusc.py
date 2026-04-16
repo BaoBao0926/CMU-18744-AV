@@ -27,7 +27,8 @@ import DeeplabV3.misc.segm.lookup_table as lut
 
 # --- Config (globals) ---
 DATAROOT = "/home/zl3466/Documents/dataset/NuScenes"
-SCENE_NAME = "scene-0945"
+# SCENE_NAME = "scene-0945"
+SCENE_NAME = "scene-0956"
 DISPLAY_SIZE = (1280, 720)
 
 IMGSZ, STRIDE = 640, 32
@@ -279,6 +280,7 @@ if __name__ == "__main__":
         paths.append(os.path.join(DATAROOT, sd["filename"]))
         sd_token = sd["next"]
 
+    # load yolopv2 drivable area model
     yolo = torch.jit.load(YOLO_WEIGHTS).to(device).eval()
     half = device.type != "cpu"
     if half:
@@ -295,6 +297,8 @@ if __name__ == "__main__":
         A.Lambda(name="to_tensor", image=to_tensor),
     ])
     transform_padded = A.Compose([A.Resize(width=DISPLAY_SIZE[0], height=DISPLAY_SIZE[1]), A.PadIfNeeded(736, 1280)])
+
+    # load deeplab obj det model
     deeplab = torch.load(DEEPLAB_MODEL_PATH, map_location=device, weights_only=False)
     deeplab.eval()
     th_lut = get_colormap(device)
@@ -308,6 +312,8 @@ if __name__ == "__main__":
             for k in range(len(det) - 1, -1, -1):
                 plot_one_box(det[k, :4].cpu().tolist(), merged, line_thickness=3)
         apply_yolo_seg_overlay(merged, da, ll)
+
+        # get route
         path_px, binary, grid, start_px, goal_px = plan_route(da, safety_px=SAFETY_DISTANCE_PIXELS)
         draw_route_overlay(merged, path_px, binary, grid, start_px, goal_px)
         draw_legend(merged)
